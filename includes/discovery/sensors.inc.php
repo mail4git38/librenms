@@ -1,31 +1,14 @@
 <?php
 
+use LibreNMS\Device\YamlDiscovery;
+use LibreNMS\OS;
+
 $valid['sensor'] = array();
 
-// Pre-cache data for later use
-$pre_cache = array();
-$pre_cache_file = 'includes/discovery/sensors/pre-cache/' . $device['os'] . '.inc.php';
-if (is_file($pre_cache_file)) {
-    echo "Pre-cache {$device['os']}: ";
-    include $pre_cache_file;
-    echo PHP_EOL;
-    d_echo($pre_cache);
-}
+/** @var OS $os */
+$pre_cache = $os->preCache();
 
-if (isset($device['dynamic_discovery']['modules']['sensors'])) {
-    foreach ($device['dynamic_discovery']['modules']['sensors'] as $key => $data_array) {
-        foreach ($data_array as $data) {
-            foreach ((array)$data['oid'] as $oid) {
-                $tmp_name = $oid;
-                if (!isset($pre_cache[$tmp_name])) {
-                    $pre_cache[$tmp_name] = snmpwalk_cache_oid($device, $oid, array(), $device['dynamic_discovery']['mib'], null, '-OeQUs');
-                }
-            }
-        }
-    }
-}
-
-// Run custom sensors 
+// Run custom sensors
 require 'includes/discovery/sensors/cisco-entity-sensor.inc.php';
 require 'includes/discovery/sensors/entity-sensor.inc.php';
 require 'includes/discovery/sensors/ipmi.inc.php';
@@ -66,6 +49,14 @@ $run_sensors = array(
     'temperature',
     'voltage',
     'snr',
+    'pressure',
+    'cooling',
+    'delay',
+    'quality_factor',
+    'chromatic_dispersion',
+    'ber',
+    'eer',
+    'waterflow',
 );
 sensors($run_sensors, $device, $valid, $pre_cache);
 unset(

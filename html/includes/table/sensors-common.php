@@ -1,8 +1,23 @@
 <?php
+/*
+ * LibreNMS
+ *
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation, either version 3 of the License, or (at your
+ * option) any later version.  Please see LICENSE.txt at the top level of
+ * the source code distribution for details.
+ *
+ * @package    LibreNMS
+ * @subpackage webui
+ * @link       http://librenms.org
+ * @copyright  2018 LibreNMS
+ * @author     LibreNMS Contributors
+*/
 
-$graph_type = mres($_POST['graph_type']);
-$unit       = mres($_POST['unit']);
-$class      = mres($_POST['class']);
+$graph_type = mres($vars['graph_type']);
+$unit       = mres($vars['unit']);
+$class      = mres($vars['class']);
 
 $sql = " FROM `$table` AS S, `devices` AS D";
 
@@ -11,7 +26,7 @@ if (is_admin() === false && is_read() === false) {
 }
 
 $sql .= " WHERE S.sensor_class=? AND S.device_id = D.device_id ";
-$param[] = mres($_POST['class']);
+$param[] = mres($vars['class']);
 
 if (is_admin() === false && is_read() === false) {
     $sql .= " AND D.device_id = P.device_id AND P.user_id = ?";
@@ -104,7 +119,7 @@ foreach (dbFetchRows($sql, $param) as $sensor) {
         'sensor_limit'     => is_null($sensor['sensor_limit']) ? '-' : round($sensor['sensor_limit'], 2).$unit,
     );
 
-    if ($_POST['view'] == 'graphs') {
+    if ($vars['view'] == 'graphs') {
         $daily_graph = 'graph.php?id='.$sensor['sensor_id'].'&amp;type='.$graph_type.'&amp;from='.$config['time']['day'].'&amp;to='.$config['time']['now'].'&amp;width=211&amp;height=100';
         $daily_url   = 'graph.php?id='.$sensor['sensor_id'].'&amp;type='.$graph_type.'&amp;from='.$config['time']['day'].'&amp;to='.$config['time']['now'].'&amp;width=400&amp;height=150';
 

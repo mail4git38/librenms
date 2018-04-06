@@ -1,26 +1,29 @@
 source: Extensions/Applications.md
-Applications
-------------
+## Introduction
+
 You can use Application support to graph performance statistics from many applications.
 
-Different applications support a variety of ways collect data: by direct connection to the application, snmpd extend, or [the agent](Agent-Setup.md).
+Different applications support a variety of ways to collect data: by direct connection to the application, snmpd extend, or [the agent](Agent-Setup.md).
 
 1. [Apache](#apache) - SNMP extend, Agent
 1. [BIND9/named](#bind9-aka-named) - SNMP extend, Agent
+1. [C.H.I.P.](#chip) - SNMP extend
 1. [DHCP Stats](#dhcp-stats) - SNMP extend
 1. [EXIM Stats](#exim-stats) - SNMP extend
 1. [Fail2ban](#fail2ban) - SNMP extend
 1. [FreeBSD NFS Client](#freebsd-nfs-client) - SNMP extend
 1. [FreeBSD NFS Server](#freebsd-nfs-server) - SNMP extend
+1. [FreeRADIUS](#freeradius) - SNMP extend, Agent
+1. [Freeswitch](#freeswitch) - SNMP extend, Agent
 1. [GPSD](#gpsd) - Agent
 1. [Mailscanner](#mailscanner) - SNMP extend
 1. [Memcached](#memcached) - SNMP extend
 1. [Munin](#munin) - Agent
 1. [MySQL](#mysql) - SNMP extend, Agent
-1. [NGINX](#nginx) - Agent
-1. [NFS-server](#nfs-server) - SNMP extend
+1. [NGINX](#nginx) - SNMP extend, Agent
+1. [NFS Server](#nfs-server) - SNMP extend
 1. [NTP Client](#ntp-client) - SNMP extend
-1. [NTP Server](#ntp-server) - SNMP extend
+1. [NTP Server/NTPD](#ntp-server-aka-ntpd) - SNMP extend
 1. [Nvidia GPU](#nvidia-gpu) - SNMP extend
 1. [Open Grid Scheduler](#opengridscheduler) - SNMP extend
 1. [OS Updates](#os-updates) - SNMP extend
@@ -30,6 +33,7 @@ Different applications support a variety of ways collect data: by direct connect
 1. [Postgres](#postgres) - SNMP extend
 1. [PowerDNS](#powerdns) - Agent
 1. [PowerDNS Recursor](#powerdns-recursor) - Direct, Agent
+1. [PowerDNS dnsdist](#powerdns-dnsdist) - SNMP extend
 1. [Proxmox](#proxmox) - SNMP extend
 1. [Raspberry PI](#raspberry-pi) - SNMP extend
 1. [SDFS info](#sdfs-info) - SNMP extend
@@ -39,6 +43,7 @@ Different applications support a variety of ways collect data: by direct connect
 1. [Unbound](#unbound) - Agent
 1. [UPS-nut](#ups-nut) - SNMP extend
 1. [UPS-apcups](#ups-apcups) - SNMP extend
+1. [ZFS](#zfs) - SNMP extend
 
 ### Apache
 Either use SNMP extend or use the agent.
@@ -54,7 +59,7 @@ wget https://raw.githubusercontent.com/librenms/librenms-agent/master/snmp/apach
 2. Make the script executable (chmod +x /etc/snmp/apache-stats.py)
 
 3. Verify it is working by running /etc/snmp/apache-stats.py
-(In some cases urlgrabber needs to be installed, in Debian it can be achieved by: apt-get install python-urlgrabber)
+In some cases urlgrabber and pycurl needs to be installed, in Debian this can be achieved by: apt-get install python-urlgrabber python-pycurl . Make sure to remove /tmp/apache-snmp afterwards.
 
 4. Edit your snmpd.conf file (usually /etc/snmp/snmpd.conf) and add:
 ```
@@ -62,6 +67,11 @@ extend apache /etc/snmp/apache-stats.py
 ```
 
 5. Restart snmpd on your host
+
+6. Test by running
+```
+snmpwalk <various options depending on your setup> localhost NET-SNMP-EXTEND-MIB::nsExtendOutput2Table
+```
 
 ##### Agent
 [Install the agent](Agent-Setup.md) on this device if it isn't already and copy the `apache` script to `/usr/lib/check_mk_agent/local/`
@@ -141,12 +151,34 @@ extend bind /etc/snmp/bind
 
 3: Set the variable 'agent' to '1' in the config.
 
+### C.H.I.P
+
+C.H.I.P. is a $9 R8 based tiny computer ideal for small projects.  
+Further details: https://getchip.com/pages/chip
+
+#### SNMP Extend
+1. Copy the shell script to the desired host (the host must be added to LibreNMS devices)
+```
+wget https://raw.githubusercontent.com/librenms/librenms-agent/master/snmp/chip.sh -O /etc/snmp/power-stat.sh
+```
+
+2. Make the script executable (chmod +x /etc/snmp/power-stat.sh)
+
+3. Edit your snmpd.conf file (usually /etc/snmp/snmpd.conf) and add:
+```
+extend power-stat /etc/snmp/power-stat.sh
+```
+4. Restart snmpd on your host
+
 
 ### DHCP Stats
 A small shell script that reports current DHCP leases stats.
 
 ##### SNMP Extend
 1. Copy the shell script to the desired host (the host must be added to LibreNMS devices)
+```
+wget https://github.com/librenms/librenms-agent/raw/master/snmp/dhcp-status.sh -O /etc/snmp/dhcp-status.sh
+```
 
 2. Make the script executable (chmod +x /etc/snmp/dhcp-status.sh)
 
@@ -185,26 +217,41 @@ snmp ALL=(ALL) NOPASSWD: /etc/snmp/exim-stats.sh, /usr/bin/exim*
 
 2: Make the script executable (chmod +x /etc/snmp/fail2ban)
 
-3: Edit your snmpd.conf file (usually /etc/snmp/fail2ban) and add:
+3: Edit your snmpd.conf file (usually /etc/snmp/snmpd.conf) and add:
 ```
 extend fail2ban /etc/snmp/fail2ban
 ```
 
-4: Edit /etc/snmp/fail2ban to match the firewall table you are using on your system. You should be good if you are using the defaults. Also make sure that the cache variable is properly set if you wish to use caching. The directory it exists in, needs to exist as well. To make sure it is working with out issue, run '/etc/snmp/fail2ban -u' and make sure it runs with out producing any errors.
+If you want to use the cache, it is as below, by using the -c switch.
+```
+extend fail2ban /etc/snmp/fail2ban -c
+```
+
+If you want to use the cache and update it if needed, this can by using the -c and -U switches.
+```
+extend fail2ban /etc/snmp/fail2ban -c -U
+```
+
+If you need to specify a custom location for the fail2ban-client, that can be done via the -f switch.
+
+If not specified, "/usr/bin/env fail2ban-client" is used.
+
+```
+extend fail2ban /etc/snmp/fail2ban -f /foo/bin/fail2ban-client
+```
 
 5: Restart snmpd on your host
 
-6: If you wish to use caching, add the following to /etc/crontab and restart cron.
+6: If you wish to use caching, add the following to /etc/crontab and restart cron. 
 ```
 */3    *    *    *    *    root    /etc/snmp/fail2ban -u 
 ```
 
 7: Restart or reload cron on your system.
 
-In regards to the totals graphed there are two variables banned and firewalled. Firewalled is a count of banned entries the firewall for fail2ban and banned is the currently banned total from fail2ban-client. Both are graphed as the total will diverge with some configurations when fail2ban fails to see if a IP is in more than one jail when unbanning it. This is most likely to happen when the recidive is in use.
-
 If you have more than a few jails configured, you may need to use caching as each jail needs to be polled and fail2ban-client can't do so in a timely manner for than a few. This can result in failure of other SNMP information being polled.
 
+For additional details of the switches, please see the POD in the script it self at the top.
 
 ### FreeBSD NFS Client
 #### SNMP Extend
@@ -234,6 +281,95 @@ extend fbsdnfsserver /etc/snmp/fbsdnfsserver
 4: Restart snmpd on your host
 
 
+### FreeRADIUS
+The FreeRADIUS application extension requires that status_server be enabled in your FreeRADIUS config.  For more information see: https://wiki.freeradius.org/config/Status
+
+You should note that status requests increment the FreeRADIUS request stats.  So LibreNMS polls will ultimately be reflected in your stats/charts.
+
+1: Go to your FreeRADIUS configuration directory (usually /etc/raddb or /etc/freeradius).
+
+2: `cd sites-enabled`
+
+3: `ln -s ../sites-available/status status`
+
+4: Restart FreeRADIUS.
+
+5: You should be able to test with the radclient as follows...
+```
+echo "Message-Authenticator = 0x00, FreeRADIUS-Statistics-Type = 31, Response-Packet-Type = Access-Accept" | \
+radclient -x localhost:18121 status adminsecret
+```
+Note that adminsecret is the default secret key in status_server.  Change if you've modified this.
+
+##### SNMP Extend
+
+1: Copy the freeradius shell script, to the desired host (the host must be added to LibreNMS devices)
+```
+wget https://raw.githubusercontent.com/librenms/librenms-agent/master/snmp/freeradius.sh -O /etc/snmp/freeradius.sh
+```
+
+2: Make the script executable (chmod +x /etc/snmp/freeradius.sh)
+
+3: If you've made any changes to the FreeRADIUS status_server config (secret key, port, etc.) edit freeradius.sh and adjust the config variable accordingly.
+
+4: Edit your snmpd.conf file and add:
+```
+extend freeradius /etc/snmp/freeradius.sh
+```
+
+5: Restart snmpd on the host in question.
+
+##### Agent
+
+1: [Install the agent](Agent-Setup.md) on this device if it isn't already and copy the script to `/usr/lib/check_mk_agent/local/freeradius.sh` via `wget https://raw.githubusercontent.com/librenms/librenms-agent/master/snmp/freeradius.sh -O /usr/lib/check_mk_agent/local/freeradius.sh`
+
+2: Run `chmod +x /usr/lib/check_mk_agent/local/freeradius.sh`
+
+3: If you've made any changes to the FreeRADIUS status_server config (secret key, port, etc.) edit freeradius.sh and adjust the config variable accordingly.
+
+4: Edit the freeradius.sh script and set the variable 'AGENT' to '1' in the config.
+
+
+### Freeswitch
+A small shell script that reports various Freeswitch call status.
+
+##### Agent
+1. [Install the agent](Agent-Setup.md) on your Freeswitch server if it isn't already
+
+2. Copy the [freeswitch script](https://github.com/librenms/librenms-agent/blob/master/agent-local/freeswitch) to `/usr/lib/check_mk_agent/local/`
+
+3. Configure `FSCLI` in the script. You may also have to create an `/etc/fs_cli.conf` file if your `fs_cli` command requires authentication.
+
+4. Verify it is working by running `/usr/lib/check_mk_agent/local/freeswitch`
+
+##### SNMP Extend
+1. Copy the [freeswitch script](https://github.com/librenms/librenms-agent/blob/master/agent-local/freeswitch) to `/etc/snmp/` on your Freeswitch server.
+
+2. Make the script executable: `chmod +x /etc/snmp/freeswitch`
+
+3. Configure `FSCLI` in the script. You may also have to create an `/etc/fs_cli.conf` file if your `fs_cli` command requires authentication.
+
+4. Verify it is working by running `/etc/snmp/freeswitch`
+
+5. Edit your snmpd.conf file (usually `/etc/snmp/snmpd.conf`) and add:
+```
+extend freeswitch /etc/snmp/freeswitch
+```
+
+6. Restart snmpd on your host
+
+
+### GPSD
+A small shell script that reports GPSD status.
+
+##### Agent
+[Install the agent](Agent-Setup.md) on this device if it isn't already and copy the `gpsd` script to `/usr/lib/check_mk_agent/local/`
+
+You may need to configure `$server` or `$port`.
+
+Verify it is working by running `/usr/lib/check_mk_agent/local/gpsd`
+
+
 ### Mailscanner
 ##### SNMP Extend
 1. Download the script onto the desired host (the host must be added to LibreNMS devices)
@@ -249,17 +385,6 @@ extend mailscanner /etc/snmp/mailscanner.php
 ```
 
 4. Restart snmpd on your host
-
-
-### GSPD
-A small shell script that reports GPSD status.
-
-##### Agent
-[Install the agent](Agent-Setup.md) on this device if it isn't already and copy the `gpsd` script to `/usr/lib/check_mk_agent/local/`
-
-You may need to configure `$server` or `$port`.
-
-Verify it is working by running `/usr/lib/check_mk_agent/local/gpsd`
 
 
 ### Memcached
@@ -383,7 +508,7 @@ extend nginx /etc/snmp/nginx-stats
 ##### Agent
 [Install the agent](Agent-Setup.md) on this device if it isn't already and copy the `nginx` script to `/usr/lib/check_mk_agent/local/`
 
-##### NFS-server
+### NFS Server
 Export the NFS stats from as server.
 
 ##### SNMP Extend
@@ -413,7 +538,7 @@ extend ntp-client /etc/snmp/ntp-client.sh
 
 4. Restart snmpd on your host
 
-### NTP Server (NTPD)
+### NTP Server aka NTPD
 A shell script that gets stats from ntp server (ntpd).
 
 ##### SNMP Extend
@@ -590,7 +715,7 @@ The web-server must be enabled, see the Recursor docs: https://doc.powerdns.com/
 `$config['apps']['powerdns-recursor']['https']` true or false, defaults to use http.
 
 #### SNMP Extend
-1: Copy the shell script, postgres, to the desired host (the host must be added to LibreNMS devices) (wget https://github.com/librenms/librenms-agent/raw/master/snmp/powerdns-recursor -O /etc/snmp/powerdns-recursor)
+1: Copy the shell script, powerdns-recursor, to the desired host (the host must be added to LibreNMS devices) (wget https://github.com/librenms/librenms-agent/raw/master/snmp/powerdns-recursor -O /etc/snmp/powerdns-recursor)
 
 2: Make the script executable (chmod +x /etc/snmp/powerdns-recursor)
 
@@ -606,6 +731,23 @@ extend powerdns-recursor /etc/snmp/powerdns-recursor
 
 This script uses `rec_control get-all` to collect stats.
 
+### PowerDNS-dnsdist
+
+###### SNMP Extend
+1. Copy the BASH script to the desired host (the host must be added to LibreNMS devices)
+```
+wget https://github.com/librenms/librenms-agent/raw/master/snmp/powerdns-dnsdist -O /etc/snmp/powerdns-dnsdist   
+```
+
+2. Make the script executable (chmod +x /etc/snmp/powerdns-dnsdist)
+
+3. Edit your snmpd.conf file (usually /etc/snmp/snmpd.conf) and add:
+```
+extend powerdns-dnsdist /etc/snmp/powerdns-dnsdist
+```
+
+4. Restart snmpd on your host.
+
 ### Proxmox
 1. For Proxmox 4.4+ install the libpve-apiclient-perl package
 `apt install libpve-apiclient-perl`
@@ -617,9 +759,18 @@ This script uses `rec_control get-all` to collect stats.
 
 4. Edit your snmpd.conf file (usually `/etc/snmp/snmpd.conf`) and add:
 `extend proxmox /usr/local/bin/proxmox`
-(Note: if your snmpd doesn't run as root, you might have to invoke the script using sudo. `extend proxmox /usr/bin/sudo /usr/local/bin/proxmox`)
 
-5. Restart snmpd on your host
+5. Note: if your snmpd doesn't run as root, you might have to invoke the script using sudo and modify the "extend" line
+```
+extend proxmox /usr/bin/sudo /usr/local/bin/proxmox 
+```
+
+after, edit your sudo users (usually `visudo`) and add at the bottom:
+```
+snmp ALL=(ALL) NOPASSWD: /usr/local/bin/proxmox
+```
+
+6. Restart snmpd on your host
 
 
 ### Raspberry PI
@@ -680,6 +831,15 @@ If you have a large number of more than one or two disks on a system, you should
 ```
  */3 * * * * /etc/snmp/smart -u
 ```
+
+6. If your snmp agent runs as user "snmp", edit your sudo users (usually `visudo`) and add at the bottom:
+```
+snmp ALL=(ALL) NOPASSWD: /etc/snmp/smart, /usr/sbin/smartctl
+```
+and modify your snmpd.conf file accordingly:
+```
+extend smart /usr/bin/sudo /etc/snmp/smart
+``` 
 
 ### Squid
 
@@ -817,3 +977,22 @@ extend sdfsinfo /etc/snmp/sdfsinfo
 4. Restart snmpd on your host
 
 5. On the device page in Librenms, edit your host and check the `SDFS info` under the Applications tab or wait for it to be auto-discovered.
+
+### ZFS
+
+###### SNMP Extend
+1. Copy the perl script to the desired host (the host must be added to LibreNMS devices)
+```
+wget https://github.com/librenms/librenms-agent/raw/master/snmp/zfs-freebsd -O /etc/snmp/zfs-freebsd
+```
+
+2. Make the script executable (chmod +x /etc/snmp/zfs-freebsd)
+
+3. Edit your snmpd.conf file (usually /etc/snmp/snmpd.conf) and add:
+```
+extend zfs /etc/snmp/zfs-freebsd
+```
+
+4. Restart snmpd on your host
+
+At this time, only FreeBSD is support. Linux support is eventually planned.

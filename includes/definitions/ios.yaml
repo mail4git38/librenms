@@ -18,6 +18,7 @@ discovery:
       sysDescr_except:
           - 'LINUX_IOSD'
           - 'IOS-XE'
+          - 'CAT3K_CAA'
 bad_ifXEntry:
     - cisco1941
     - cisco886Va
@@ -42,7 +43,7 @@ discovery_modules:
     cisco-mac-accounting: 1
     cisco-otv: 1
     cisco-pw: 1
-    cisco-vrf: 1
+    vrf: 1
     cisco-vrf-lite: 1
 register_mibs:
     ciscoAAASessionMIB: CISCO-AAA-SESSION-MIB

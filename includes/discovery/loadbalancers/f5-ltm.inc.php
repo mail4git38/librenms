@@ -12,6 +12,8 @@
  */
 
 // Define some error messages
+use LibreNMS\Util\IP;
+
 $error_poolaction = array();
 $error_poolaction[0] = "Unused";
 $error_poolaction[1] = "Reboot";
@@ -71,8 +73,13 @@ if (!is_null($ltmVirtualServEntry) || !is_null($ltmVsStatusEntry) || !is_null($l
                 // The UID is far too long to have in a RRD filename, use a hash of it instead.
                 $result['hash'] = hash('crc32', $result['UID']);
 
+                // Trim IPv4 response to remove route domain ID
+                if (strlen($ltmVirtualServEntry['1.3.6.1.4.1.3375.2.2.10.1.2.1.3.'.$index]) == 23) {
+                    $ltmVirtualServEntry['1.3.6.1.4.1.3375.2.2.10.1.2.1.3.'.$index] = substr($ltmVirtualServEntry['1.3.6.1.4.1.3375.2.2.10.1.2.1.3.'.$index], 0, 11);
+                }
+
                 // Now that we have our UID we can pull all the other data we need.
-                $result['IP'] = hex_to_ip($ltmVirtualServEntry['1.3.6.1.4.1.3375.2.2.10.1.2.1.3.'.$index]);
+                $result['IP'] = IP::fromHexString($ltmVirtualServEntry['1.3.6.1.4.1.3375.2.2.10.1.2.1.3.'.$index], true);
                 $result['port'] = $ltmVirtualServEntry['1.3.6.1.4.1.3375.2.2.10.1.2.1.6.'.$index];
                 $result['pool'] = $ltmVirtualServEntry['1.3.6.1.4.1.3375.2.2.10.1.2.1.19.'.$index];
 
@@ -168,7 +175,7 @@ if (!is_null($ltmVirtualServEntry) || !is_null($ltmVsStatusEntry) || !is_null($l
                 $result['hash'] = hash('crc32', $result['UID']);
 
                 // Now that we have our UID we can pull all the other data we need.
-                $result['IP'] = hex_to_ip($ltmPoolMemberEntry['1.3.6.1.4.1.3375.2.2.5.3.2.1.3.'.$index]);
+                $result['IP'] = IP::fromHexString($ltmPoolMemberEntry['1.3.6.1.4.1.3375.2.2.5.3.2.1.3.'.$index], true);
                 $result['port'] = $ltmPoolMemberEntry['1.3.6.1.4.1.3375.2.2.5.3.2.1.4.'.$index];
                 $result['ratio'] = $ltmPoolMemberEntry['1.3.6.1.4.1.3375.2.2.5.3.2.1.6.'.$index];
                 $result['weight'] = $ltmPoolMemberEntry['1.3.6.1.4.1.3375.2.2.5.3.2.1.7.'.$index];
@@ -255,4 +262,4 @@ if (!is_null($ltmVirtualServEntry) || !is_null($ltmVsStatusEntry) || !is_null($l
     // Write the Components back to the DB.
     $component->setComponentPrefs($device['device_id'], $components);
     echo "\n";
-} // End if not error
+}// End if not error

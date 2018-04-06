@@ -1,6 +1,8 @@
 <?php
 
 // Build a dictionary of vlans in database
+use LibreNMS\Config;
+
 $vlans_dict = array();
 foreach (dbFetchRows("SELECT `vlan_id`, `vlan_vlan` from `vlans` WHERE `device_id` = ?", array($device['device_id'])) as $vlan_entry) {
     $vlans_dict[$vlan_entry['vlan_vlan']] = $vlan_entry['vlan_id'];
@@ -11,15 +13,17 @@ $vlans_by_id = array_flip($vlans_dict);
 $existing_fdbs = array();
 $sql_result = dbFetchRows("SELECT * FROM `ports_fdb` WHERE `device_id` = ?", array($device['device_id']));
 foreach ($sql_result as $entry) {
-    $existing_fdbs[$entry['vlan_id']][$entry['mac_address']] = $entry;
+    $existing_fdbs[(int)$entry['vlan_id']][$entry['mac_address']] = $entry;
 }
 
 $insert = array(); // populate $insert with database entries
-if ($device['os'] == 'ios') {
-    include $config['install_dir'] . '/includes/discovery/fdb-table/ios.inc.php';
+if (file_exists(Config::get('install_dir') . "/includes/discovery/fdb-table/{$device['os']}.inc.php")) {
+    require Config::get('install_dir') . "/includes/discovery/fdb-table/{$device['os']}.inc.php";
+} elseif ($device['os'] == 'ios' || $device['os'] == 'iosxe') {
+    include Config::get('install_dir') . '/includes/discovery/fdb-table/ios.inc.php';
 } else {
     // Check generic Q-BRIDGE-MIB and BRIDGE-MIB
-    include $config['install_dir'] . '/includes/discovery/fdb-table/bridge.inc.php';
+    include Config::get('install_dir') . '/includes/discovery/fdb-table/bridge.inc.php';
 }
 
 if (!empty($insert)) {
@@ -58,16 +62,32 @@ if (!empty($insert)) {
             }
         }
 
-        // Delete old entries from the database
-        foreach ($existing_fdbs[$vlan_id] as $entry) {
-                dbDelete(
-                    'ports_fdb',
-                    '`port_id` = ? AND `mac_address` = ? AND `vlan_id` = ? and `device_id` = ?',
-                    array($entry['port_id'], $entry['mac_address'], $entry['vlan_id'], $entry['device_id'])
-                );
-                echo '-';
-        }
         echo PHP_EOL;
     }
+
+    // Delete old entries from the database
+    foreach ($existing_fdbs as $vlan_id => $entries) {
+        foreach ($entries as $entry) {
+            dbDelete(
+                'ports_fdb',
+                '`port_id` = ? AND `mac_address` = ? AND `vlan_id` = ? and `device_id` = ?',
+                array($entry['port_id'], $entry['mac_address'], $entry['vlan_id'], $entry['device_id'])
+            );
+            d_echo("Deleting: {$entry['mac_address']}\n", '-');
+        }
+    }
 }
-unset($existing_fdbs, $portid_dict, $vlans_dict);
+
+unset(
+    $vlan_entry,
+    $vlans_by_id,
+    $existing_fdbs,
+    $portid_dict,
+    $vlans_dict,
+    $insert,
+    $sql_result,
+    $vlans,
+    $port,
+    $fdbPort_table,
+    $entries
+);

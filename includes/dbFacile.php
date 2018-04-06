@@ -19,6 +19,16 @@
 
 use LibreNMS\Exceptions\DatabaseConnectException;
 
+function dbIsConnected()
+{
+    global $database_link;
+    if (empty($database_link)) {
+        return false;
+    }
+
+    return mysqli_ping($database_link);
+}
+
 /**
  * Connect to the database.
  * Will use global $config variables if they are not sent: db_host, db_user, db_pass, db_name, db_port, db_socket
@@ -35,6 +45,15 @@ use LibreNMS\Exceptions\DatabaseConnectException;
 function dbConnect($host = null, $user = '', $password = '', $database = '', $port = null, $socket = null)
 {
     global $config, $database_link;
+
+    if (dbIsConnected()) {
+        return $database_link;
+    }
+
+    if (!function_exists('mysqli_connect')) {
+        throw new DatabaseConnectException("mysqli extension not loaded!");
+    }
+
     $host = empty($host) ? $config['db_host'] : $host;
     $user = empty($user) ? $config['db_user'] : $user;
     $password = empty($password) ? $config['db_pass'] : $password;
@@ -43,6 +62,7 @@ function dbConnect($host = null, $user = '', $password = '', $database = '', $po
     $socket = empty($socket) ? $config['db_socket'] : $socket;
 
     $database_link = mysqli_connect('p:' . $host, $user, $password, null, $port, $socket);
+    mysqli_options($database_link, MYSQLI_OPT_LOCAL_INFILE, false);
     if ($database_link === false) {
         $error = mysqli_connect_error();
         if ($error == 'No such file or directory') {
@@ -81,6 +101,7 @@ function dbQuery($sql, $parameters = array())
     $fullSql = dbMakeQuery($sql, $parameters);
     if ($debug) {
         if (php_sapi_name() == 'cli' && empty($_SERVER['REMOTE_ADDR'])) {
+            $fullSql = str_replace(PHP_EOL, '', $fullSql);
             if (preg_match('/(INSERT INTO `alert_log`).*(details)/i', $fullSql)) {
                 echo "\nINSERT INTO `alert_log` entry masked due to binary data\n";
             } else {
@@ -96,7 +117,9 @@ function dbQuery($sql, $parameters = array())
         $mysql_error = mysqli_error($database_link);
         if (isset($config['mysql_log_level']) && ((in_array($config['mysql_log_level'], array('INFO', 'ERROR')) && !preg_match('/Duplicate entry/', $mysql_error)) || in_array($config['mysql_log_level'], array('DEBUG')))) {
             if (!empty($mysql_error)) {
-                logfile(date($config['dateformat']['compact']) . " MySQL Error: $mysql_error ($fullSql)");
+                $error_msg =  "MySQL Error: $mysql_error ($fullSql)";
+                c_echo("%R$error_msg%n\n", isCli() || $debug);
+                logfile(date($config['dateformat']['compact']) . ' ' . $error_msg);
             }
         }
     }
@@ -168,14 +191,17 @@ function dbBulkInsert($data, $table)
         $data  = $table;
         $table = $tmp;
     }
-    if (count($data) === 0) {
+    // check that data isn't an empty array
+    if (empty($data)) {
         return false;
     }
-    if (count($data[0]) === 0) {
+    // make sure we have fields to insert
+    $fields = array_keys(reset($data));
+    if (empty($fields)) {
         return false;
     }
 
-    $sql = 'INSERT INTO `'.$table.'` (`'.implode('`,`', array_keys($data[0])).'`)  VALUES ';
+    $sql = 'INSERT INTO `'.$table.'` (`'.implode('`,`', $fields).'`)  VALUES ';
     $values ='';
 
     foreach ($data as $row) {
@@ -187,7 +213,11 @@ function dbBulkInsert($data, $table)
             if ($rowvalues != '') {
                 $rowvalues .= ',';
             }
-            $rowvalues .= "'".mres($value)."'";
+            if (is_null($value)) {
+                $rowvalues .= 'NULL';
+            } else {
+                $rowvalues .= "'" . mres($value) . "'";
+            }
         }
         $values .= "(".$rowvalues.")";
     }
@@ -269,23 +299,63 @@ function dbDelete($table, $where = null, $parameters = array())
 }//end dbDelete()
 
 
+/**
+ * Delete orphaned entries from a table that no longer have a parent in parent_table
+ * Format of parents array is as follows table.table_key_column<.target_key_column>
+ *
+ * @param string $target_table The table to delete entries from
+ * @param array $parents an array of parent tables to check.
+ * @return bool|int
+ */
+function dbDeleteOrphans($target_table, $parents)
+{
+    global $database_link;
+    $time_start = microtime(true);
+
+    if (empty($parents)) {
+        // don't delete all entries if parents is missing
+        return false;
+    }
+
+    $target_table = mres($target_table);
+    $sql = "DELETE T FROM `$target_table` T";
+    $where = array();
+
+    foreach ((array)$parents as $parent) {
+        $parent_parts = explode('.', mres($parent));
+        if (count($parent_parts) == 2) {
+            list($parent_table, $parent_column) = $parent_parts;
+            $target_column = $parent_column;
+        } elseif (count($parent_parts) == 3) {
+            list($parent_table, $parent_column, $target_column) = $parent_parts;
+        } else {
+            // invalid input
+            return false;
+        }
+
+        $sql .= " LEFT JOIN `$parent_table` ON `$parent_table`.`$parent_column` = T.`$target_column`";
+        $where[] = " `$parent_table`.`$parent_column` IS NULL";
+    }
+
+    $query = "$sql WHERE" . implode(' AND', $where);
+    $result = dbQuery($query, array());
+
+    recordDbStatistic('delete', $time_start);
+    if ($result) {
+        return mysqli_affected_rows($database_link);
+    } else {
+        return false;
+    }
+}
+
 /*
  * Fetches all of the rows (associatively) from the last performed query.
  * Most other retrieval functions build off this
  * */
 
 
-function dbFetchRows($sql, $parameters = array(), $nocache = false)
+function dbFetchRows($sql, $parameters = array())
 {
-    global $config;
-
-    if ($config['memcached']['enable'] && $nocache === false) {
-        $result = $config['memcached']['resource']->get(hash('sha512', $sql.'|'.serialize($parameters)));
-        if (!empty($result)) {
-            return $result;
-        }
-    }
-
     $time_start = microtime(true);
     $result         = dbQuery($sql, $parameters);
 
@@ -296,9 +366,7 @@ function dbFetchRows($sql, $parameters = array(), $nocache = false)
         }
 
         mysqli_free_result($result);
-        if ($config['memcached']['enable'] && $nocache === false) {
-            $config['memcached']['resource']->set(hash('sha512', $sql.'|'.serialize($parameters)), $rows, $config['memcached']['ttl']);
-        }
+
         recordDbStatistic('fetchrows', $time_start);
         return $rows;
     }
@@ -318,9 +386,9 @@ function dbFetchRows($sql, $parameters = array(), $nocache = false)
  * */
 
 
-function dbFetch($sql, $parameters = array(), $nocache = false)
+function dbFetch($sql, $parameters = array())
 {
-    return dbFetchRows($sql, $parameters, $nocache);
+    return dbFetchRows($sql, $parameters);
     /*
         // for now, don't do the iterator thing
         $result = dbQuery($sql, $parameters);
@@ -340,17 +408,8 @@ function dbFetch($sql, $parameters = array(), $nocache = false)
  * */
 
 
-function dbFetchRow($sql = null, $parameters = array(), $nocache = false)
+function dbFetchRow($sql = null, $parameters = array())
 {
-    global $config;
-
-    if (isset($config['memcached']['enable']) && $config['memcached']['enable'] && $nocache === false) {
-        $result = $config['memcached']['resource']->get(hash('sha512', $sql.'|'.serialize($parameters)));
-        if (!empty($result)) {
-            return $result;
-        }
-    }
-
     $time_start = microtime(true);
     $result         = dbQuery($sql, $parameters);
     if ($result) {
@@ -358,10 +417,6 @@ function dbFetchRow($sql = null, $parameters = array(), $nocache = false)
         mysqli_free_result($result);
 
         recordDbStatistic('fetchrow', $time_start);
-
-        if (isset($config['memcached']['enable']) && $config['memcached']['enable'] && $nocache === false) {
-            $config['memcached']['resource']->set(hash('sha512', $sql.'|'.serialize($parameters)), $row, $config['memcached']['ttl']);
-        }
         return $row;
     } else {
         return null;
@@ -374,10 +429,10 @@ function dbFetchRow($sql = null, $parameters = array(), $nocache = false)
  * */
 
 
-function dbFetchCell($sql, $parameters = array(), $nocache = false)
+function dbFetchCell($sql, $parameters = array())
 {
     $time_start = microtime(true);
-    $row = dbFetchRow($sql, $parameters, $nocache);
+    $row = dbFetchRow($sql, $parameters);
 
     recordDbStatistic('fetchcell', $time_start);
     if ($row) {
@@ -394,11 +449,11 @@ function dbFetchCell($sql, $parameters = array(), $nocache = false)
  * */
 
 
-function dbFetchColumn($sql, $parameters = array(), $nocache = false)
+function dbFetchColumn($sql, $parameters = array())
 {
     $time_start = microtime(true);
     $cells          = array();
-    foreach (dbFetch($sql, $parameters, $nocache) as $row) {
+    foreach (dbFetch($sql, $parameters) as $row) {
         $cells[] = array_shift($row);
     }
 
@@ -414,10 +469,10 @@ function dbFetchColumn($sql, $parameters = array(), $nocache = false)
  */
 
 
-function dbFetchKeyValue($sql, $parameters = array(), $nocache = false)
+function dbFetchKeyValue($sql, $parameters = array())
 {
     $data = array();
-    foreach (dbFetch($sql, $parameters, $nocache) as $row) {
+    foreach (dbFetch($sql, $parameters) as $row) {
         $key = array_shift($row);
         if (sizeof($row) == 1) {
             // if there were only 2 fields in the result
@@ -571,4 +626,112 @@ function dbRollbackTransaction()
 function dbGenPlaceholders($count)
 {
     return '(' . implode(',', array_fill(0, $count, '?')) . ')';
+}
+
+/**
+ * Update statistics for db operations
+ *
+ * @param string $stat fetchcell, fetchrow, fetchrows, fetchcolumn, update, insert, delete
+ * @param float $start_time The time the operation started with 'microtime(true)'
+ * @return float  The calculated run time
+ */
+function recordDbStatistic($stat, $start_time)
+{
+    global $db_stats;
+
+    if (!isset($db_stats)) {
+        $db_stats = array(
+            'ops' => array(
+                'insert' => 0,
+                'update' => 0,
+                'delete' => 0,
+                'fetchcell' => 0,
+                'fetchcolumn' => 0,
+                'fetchrow' => 0,
+                'fetchrows' => 0,
+            ),
+            'time' => array(
+                'insert' => 0.0,
+                'update' => 0.0,
+                'delete' => 0.0,
+                'fetchcell' => 0.0,
+                'fetchcolumn' => 0.0,
+                'fetchrow' => 0.0,
+                'fetchrows' => 0.0,
+            ),
+        );
+    }
+
+    $runtime = microtime(true) - $start_time;
+    $db_stats['ops'][$stat]++;
+    $db_stats['time'][$stat] += $runtime;
+
+    //double accounting corrections
+    if ($stat == 'fetchcolumn') {
+        $db_stats['ops']['fetchrows']--;
+        $db_stats['time']['fetchrows'] -= $runtime;
+    }
+    if ($stat == 'fetchcell') {
+        $db_stats['ops']['fetchrow']--;
+        $db_stats['time']['fetchrow'] -= $runtime;
+    }
+
+    return $runtime;
+}
+
+/**
+ * Synchronize a relationship to a list of related ids
+ *
+ * @param string $table
+ * @param string $target_column column name for the target
+ * @param int $target column target id
+ * @param string $list_column related column names
+ * @param array $list list of related ids
+ * @return array [$inserted, $deleted]
+ */
+function dbSyncRelationship($table, $target_column = null, $target = null, $list_column = null, $list = null)
+{
+    $inserted = 0;
+
+    $delete_query = "`$target_column`=? AND `$list_column`";
+    $delete_params = [$target];
+    if (!empty($list)) {
+        $delete_query .= ' NOT IN ' . dbGenPlaceholders(count($list));
+        $delete_params = array_merge($delete_params, $list);
+    }
+    $deleted = (int)dbDelete($table, $delete_query, $delete_params);
+
+    $db_list = dbFetchColumn("SELECT `$list_column` FROM `$table` WHERE `$target_column`=?", [$target]);
+    foreach ($list as $item) {
+        if (!in_array($item, $db_list)) {
+            dbInsert([$target_column => $target, $list_column => $item], $table);
+            $inserted++;
+        }
+    }
+
+    return [$inserted, $deleted];
+}
+
+/**
+ * Synchronize a relationship to a list of relations
+ *
+ * @param string $table
+ * @param array $relationships array of relationship pairs with columns as keys and ids as values
+ * @return array [$inserted, $deleted]
+ */
+function dbSyncRelationships($table, $relationships = array())
+{
+    $changed = [[0, 0]];
+    list($target_column, $list_column) = array_keys(reset($relationships));
+
+    $grouped = [];
+    foreach ($relationships as $relationship) {
+        $grouped[$relationship[$target_column]][] = $relationship[$list_column];
+    }
+
+    foreach ($grouped as $target => $list) {
+        $changed[] = dbSyncRelationship($table, $target_column, $target, $list_column, $list);
+    }
+
+    return [array_sum(array_column($changed, 0)), array_sum(array_column($changed, 1))];
 }

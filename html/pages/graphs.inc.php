@@ -71,10 +71,8 @@ if (!$auth) {
 
     print_optionbar_end();
 
-    print_optionbar_start();
 
-    $thumb_array = array('sixhour' => '6 Hours', 'day' => '24 Hours', 'twoday' => '48 Hours', 'week' => 'One Week', 'twoweek' => 'Two Weeks',
-        'month' => 'One Month', 'twomonth' => 'Two Months','year' => 'One Year', 'twoyear' => 'Two Years');
+    $thumb_array = $config['graphs']['row']['normal'];
 
     echo '<table width=100% class="thumbnail_graph_table"><tr>';
 
@@ -147,8 +145,6 @@ if (!$auth) {
         echo(generate_link("Show RRD Command", $vars, array('page' => "graphs", 'showcommand' => "yes")));
     }
     echo('</center>');
-
-    print_optionbar_end();
 
     echo generate_graph_js_state($graph_array);
 

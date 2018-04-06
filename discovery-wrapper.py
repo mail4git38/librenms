@@ -89,28 +89,27 @@ db_username = config['db_user']
 db_password = config['db_pass']
 db_port = int(config['db_port'])
 
-if config['db_host'][:5].lower() == 'unix:':
+if config['db_socket']:
     db_server = config['db_host']
-    db_port = 0
-elif config['db_socket']:
-    db_server = config['db_socket']
-    db_port = 0
+    db_socket = config['db_socket']
 else:
     db_server = config['db_host']
+    db_socket = None
 
 db_dbname = config['db_name']
 
 
 def db_open():
     try:
-        if db_port == 0:
-            db = MySQLdb.connect(host=db_server, user=db_username, passwd=db_password, db=db_dbname)
+        if db_socket:
+            db = MySQLdb.connect(host=db_server, unix_socket=db_socket, user=db_username, passwd=db_password, db=db_dbname)
         else:
             db = MySQLdb.connect(host=db_server, port=db_port, user=db_username, passwd=db_password, db=db_dbname)
         return db
     except:
         print "ERROR: Could not connect to MySQL database!"
         sys.exit(2)
+
 
 # (c) 2015, GPLv3, Daniel Preussker <f0o@devilcode.org> <<<EOC1
 if 'distributed_poller_group' in config:
@@ -156,8 +155,8 @@ if ('distributed_poller' in config and
         if memc_alive():
             if memc.get("discovery.master") is None:
                 print "Registered as Master"
-                memc.set("discovery.master", config['distributed_poller_name'], 10)
-                memc.set("discovery.nodes", 0, 300)
+                memc.set("discovery.master", config['distributed_poller_name'], 30)
+                memc.set("discovery.nodes", 0, 3600)
                 IsNode = False
             else:
                 print "Registered as Node joining Master %s" % memc.get("discovery.master")
@@ -246,7 +245,7 @@ def printworker():
         global distdisco
         if distdisco:
             if not IsNode:
-                memc_touch('discovery.master', 10)
+                memc_touch('discovery.master', 30)
                 nodes = memc.get('discovery.nodes')
                 if nodes is None and not memc_alive():
                     print "WARNING: Lost Memcached. Taking over all devices. Nodes will quit shortly."
@@ -256,7 +255,7 @@ def printworker():
                     print "INFO: %s Node(s) Total" % (nodes)
                     nodeso = nodes
             else:
-                memc_touch('discovery.nodes', 10)
+                memc_touch('discovery.nodes', 30)
             try:
                 worker_id, device_id, elapsed_time = print_queue.get(False)
             except:

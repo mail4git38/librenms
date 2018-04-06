@@ -5,6 +5,8 @@ $(function () {
 </script>
 <?php
 
+use LibreNMS\Util\IP;
+
 // This file prints a table row for each interface
 $port['device_id'] = $device['device_id'];
 $port['hostname']  = $device['hostname'];
@@ -17,9 +19,9 @@ if ($int_colour) {
     $row_colour = $int_colour;
 } else {
     if (!is_integer($i / 2)) {
-        $row_colour = $list_colour_a;
+        $row_colour = $config['list_colour']['even'];
     } else {
-        $row_colour = $list_colour_b;
+        $row_colour = $config['list_colour']['odd'];
     }
 }
 
@@ -37,7 +39,7 @@ if (dbFetchCell('SELECT COUNT(*) FROM `mac_accounting` WHERE `port_id` = ?', arr
     $mac = '';
 }
 
-echo "<tr style=\"background-color: $row_colour;\" valign=top onmouseover=\"this.style.backgroundColor='$list_highlight';\" onmouseout=\"this.style.backgroundColor='$row_colour';\" style='cursor: pointer;'>
+echo "<tr style=\"background-color: $row_colour;\" valign=top onmouseover=\"this.style.backgroundColor='{$config['list_colour']['highlight']}';\" onmouseout=\"this.style.backgroundColor='$row_colour';\" style='cursor: pointer;'>
     <td valign=top width=350>";
 
 if (is_admin() || is_read()) {
@@ -62,7 +64,7 @@ if ($port_details) {
     }
 
     foreach (dbFetchRows('SELECT * FROM `ipv6_addresses` WHERE `port_id` = ?', array($port['port_id'])) as $ip6) {
-        echo "$break <a class=interface-desc href=\"javascript:popUp('netcmd.php?cmd=whois&amp;query=".$ip6['ipv6_address']."')\">".Net_IPv6::compress($ip6['ipv6_address']).'/'.$ip6['ipv6_prefixlen'].'</a>';
+        echo "$break <a class=interface-desc href=\"javascript:popUp('netcmd.php?cmd=whois&amp;query=".$ip6['ipv6_address']."')\">".IP::parse($ip6['ipv6_address'], true).'/'.$ip6['ipv6_prefixlen'].'</a>';
         $break = '<br />';
     }
 }
